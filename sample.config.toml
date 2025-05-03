@@ -1,0 +1,13 @@
+# Sample Configuration for new TSDB
+
+# Address to bind the API server to
+addr = "0.0.0.0"
+
+# Port to run the API server on
+port = 3000
+
+# Unique node identifier
+node_id = "node-a"
+
+# List of peer node URLs
+peers = ["http://localhost:4001", "http://localhost:4002"]

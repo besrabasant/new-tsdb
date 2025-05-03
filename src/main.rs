@@ -4,13 +4,15 @@ mod storage;
 mod types;
 mod wal;
 
+mod app_config;
+
+
 use axum::{
     body::Bytes,
     extract::State,
     routing::{get, post},
     Json, Router,
 };
-use clap::Parser;
 use parser::{parse_batch, ParsedLine};
 use replicator::Replicator;
 use std::sync::Arc;
@@ -20,29 +22,18 @@ use tokio::sync::Mutex;
 use types::{AppState, TimeSeriesPoint};
 use wal::WAL;
 
-/// Command-line arguments
-#[derive(Parser, Debug)]
-#[command(author, version, about = "Time Series API")]
-struct Args {
-    /// Port to listen on
-    #[arg(long, default_value = "3000")]
-    port: u16,
-}
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    let args = Args::parse(); // parse --port
+    let config = app_config::load_config();
+
+    // Load config file
 
     let wal = Arc::new(Mutex::new(WAL::new("data.wal")));
     let storage = Arc::new(Storage);
-    let node_id = std::env::var("NODE_ID").unwrap_or_else(|_| "node-a".to_string());
-
-    let peer_urls = Arc::new(vec![
-        "http://localhost:4000".to_string(),
-        "http://localhost:3000".to_string(),
-    ]);
+    let peer_urls = Arc::new(config.peers.clone());
 
     // Replay existing data
     let replayed = wal.lock().await.replay();
@@ -53,7 +44,7 @@ async fn main() {
     let state = AppState {
         wal: wal.clone(),
         storage: storage.clone(),
-        node_id,
+        node_id: config.node_id,
         peer_urls: peer_urls.clone(),
     };
 
@@ -68,7 +59,7 @@ async fn main() {
         .route("/replicate", post(replicate_handler))
         .with_state(state);
 
-    let addr = format!("0.0.0.0:{}", args.port);
+    let addr = format!("{}:{}", config.addr, config.port);
 
     // Run server
     let listener = TcpListener::bind(&addr).await.unwrap();
@@ -134,3 +125,4 @@ async fn replicate_handler(
     wal.flush();
     "Replication received and applied".to_string()
 }
+
