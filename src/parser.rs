@@ -7,7 +7,7 @@ pub enum ParsedLine {
     Err { line: usize, error: String },
 }
 
-pub fn parse_line_protocol(line: &str) -> Result<TimeSeriesPoint, String> {
+pub fn parse_line_protocol(line: &str, node_id: &str) -> Result<TimeSeriesPoint, String> {
     let parsed = parse_lines(line)
         .next()
         .ok_or("No line found")?
@@ -49,14 +49,15 @@ pub fn parse_line_protocol(line: &str) -> Result<TimeSeriesPoint, String> {
         tags,
         fields,
         timestamp,
+        node_id: node_id.to_string()
     })
 }
 
-pub fn parse_batch(input: &str) -> Vec<ParsedLine> {
+pub fn parse_batch(input: &str, node_id: &str) -> Vec<ParsedLine> {
     input
         .lines()
         .enumerate()
-        .map(|(i, line)| match parse_line_protocol(line) {
+        .map(|(i, line)| match parse_line_protocol(line, node_id) {
             Ok(point) => ParsedLine::Ok(point),
             Err(e) => ParsedLine::Err {
                 line: i + 1,
