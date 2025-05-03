@@ -4,16 +4,13 @@ mod types;
 mod wal;
 
 use axum::{
-    body::Bytes,
-    extract::State,
-    routing::{get, post},
-    Router,
+    body::Bytes, extract::State, routing::{get, post}, Json, Router
 };
 use parser::{parse_batch, ParsedLine};
 use std::sync::{Arc, Mutex};
 use storage::Storage;
 use tokio::net::TcpListener;
-use types::AppState;
+use types::{AppState, TimeSeriesPoint};
 use wal::WAL;
 
 #[tokio::main]
@@ -38,6 +35,7 @@ async fn main() {
     let app = Router::new()
         .route("/", get(root))
         .route("/ingest", post(ingest_handler))
+        .route("/replicate", post(replicate_handler))
         .with_state(state);
 
     // Run server
@@ -88,4 +86,20 @@ async fn ingest_handler(State(state): State<AppState>, data: Bytes) -> String {
     }
 
     "OK".into()
+}
+
+
+async fn replicate_handler(
+    State(state): State<AppState>,
+    Json(points): Json<Vec<TimeSeriesPoint>>,
+) -> String {
+    let mut wal = state.wal.lock().unwrap();
+
+    for point in points {
+        wal.append(&point);
+        state.storage.insert(point);
+    }
+
+    wal.flush();
+    "Replication received and applied".to_string()
 }
