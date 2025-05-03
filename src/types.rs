@@ -1,5 +1,5 @@
-use std::sync::{Arc, Mutex};
-
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use serde::{Serialize, Deserialize};
 
 use crate::{storage::Storage, wal::WAL};
@@ -28,4 +28,5 @@ pub struct AppState {
     pub wal: Arc<Mutex<WAL>>,
     pub storage: Arc<Storage>,
     pub node_id: String,
+    pub peer_urls: Arc<Vec<String>>
 }

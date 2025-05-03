@@ -1,5 +1,5 @@
 use std::fs::{OpenOptions, File};
-use std::io::{BufWriter, BufReader, Write, Read};
+use std::io::{BufReader, BufWriter, Read, SeekFrom, Write, Seek};
 use std::path::Path;
 use crate::types::TimeSeriesPoint;
 use bincode;
@@ -32,6 +32,22 @@ impl WAL {
 
     pub fn flush(&mut self) {
         self.writer.flush().expect("Flush failed");
+    }
+
+    pub fn read_since(&self, offset: usize) -> Vec<TimeSeriesPoint> {
+        let file = File::open(&self.path).expect("Failed to open WAL file for read_since");
+        let mut reader = BufReader::new(file);
+        let mut points = Vec::new();
+
+        // Seek to the byte offset
+        reader.seek(SeekFrom::Start(offset as u64)).expect("Failed to seek WAL");
+
+        // Read and deserialize entries one by one
+        while let Ok(point) = bincode::deserialize_from(&mut reader) {
+            points.push(point);
+        }
+
+        points
     }
 
     pub fn replay(&self) -> Vec<TimeSeriesPoint> {

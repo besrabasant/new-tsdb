@@ -1,26 +1,51 @@
 mod parser;
+mod replicator;
 mod storage;
 mod types;
 mod wal;
 
 use axum::{
-    body::Bytes, extract::State, routing::{get, post}, Json, Router
+    body::Bytes,
+    extract::State,
+    routing::{get, post},
+    Json, Router,
 };
+use clap::Parser;
 use parser::{parse_batch, ParsedLine};
-use std::sync::{Arc, Mutex};
+use replicator::Replicator;
+use std::sync::Arc;
 use storage::Storage;
 use tokio::net::TcpListener;
+use tokio::sync::Mutex;
 use types::{AppState, TimeSeriesPoint};
 use wal::WAL;
 
+/// Command-line arguments
+#[derive(Parser, Debug)]
+#[command(author, version, about = "Time Series API")]
+struct Args {
+    /// Port to listen on
+    #[arg(long, default_value = "3000")]
+    port: u16,
+}
+
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt::init();
+
+    let args = Args::parse(); // parse --port
+
     let wal = Arc::new(Mutex::new(WAL::new("data.wal")));
     let storage = Arc::new(Storage);
     let node_id = std::env::var("NODE_ID").unwrap_or_else(|_| "node-a".to_string());
 
+    let peer_urls = Arc::new(vec![
+        "http://localhost:4000".to_string(),
+        "http://localhost:3000".to_string(),
+    ]);
+
     // Replay existing data
-    let replayed = wal.lock().unwrap().replay();
+    let replayed = wal.lock().await.replay();
     for point in &replayed {
         storage.insert(point.clone());
     }
@@ -29,7 +54,12 @@ async fn main() {
         wal: wal.clone(),
         storage: storage.clone(),
         node_id,
+        peer_urls: peer_urls.clone(),
     };
+
+    // Spawn replicator
+    let replicator = Replicator::new(&state);
+    tokio::spawn(replicator.run());
 
     // Set up router
     let app = Router::new()
@@ -38,9 +68,11 @@ async fn main() {
         .route("/replicate", post(replicate_handler))
         .with_state(state);
 
+    let addr = format!("0.0.0.0:{}", args.port);
+
     // Run server
-    let listener = TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    println!("Listening on http://localhost:3000");
+    let listener = TcpListener::bind(&addr).await.unwrap();
+    println!("Listening on http://{}", &addr);
     axum::serve(listener, app).await.unwrap();
 }
 
@@ -56,7 +88,7 @@ async fn ingest_handler(State(state): State<AppState>, data: Bytes) -> String {
     let mut success_count = 0;
     let mut error_lines = vec![];
 
-    let mut wal = state.wal.lock().unwrap();
+    let mut wal = state.wal.lock().await;
 
     for parsed_line in parsed_lines {
         match parsed_line {
@@ -88,12 +120,11 @@ async fn ingest_handler(State(state): State<AppState>, data: Bytes) -> String {
     "OK".into()
 }
 
-
 async fn replicate_handler(
     State(state): State<AppState>,
     Json(points): Json<Vec<TimeSeriesPoint>>,
 ) -> String {
-    let mut wal = state.wal.lock().unwrap();
+    let mut wal = state.wal.lock().await;
 
     for point in points {
         wal.append(&point);
