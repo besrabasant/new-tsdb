@@ -1,8 +1,8 @@
-use std::fs::{OpenOptions, File};
-use std::io::{BufReader, BufWriter, Read, SeekFrom, Write, Seek};
-use std::path::Path;
 use crate::types::TimeSeriesPoint;
 use bincode;
+use std::fs::{File, OpenOptions};
+use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::path::Path;
 
 pub struct WAL {
     writer: BufWriter<File>,
@@ -40,11 +40,42 @@ impl WAL {
         let mut points = Vec::new();
 
         // Seek to the byte offset
-        reader.seek(SeekFrom::Start(offset as u64)).expect("Failed to seek WAL");
+        reader
+            .seek(SeekFrom::Start(offset as u64))
+            .expect("Failed to seek WAL");
 
         // Read and deserialize entries one by one
         while let Ok(point) = bincode::deserialize_from(&mut reader) {
             points.push(point);
+        }
+
+        points
+    }
+
+    pub fn read_from_offset(&self, start_offset: u64) -> Vec<(u64, TimeSeriesPoint)> {
+        let file = File::open(&self.path).expect("Failed to open WAL for read");
+        let mut reader = BufReader::new(file);
+
+        reader.seek(SeekFrom::Start(start_offset)).unwrap();
+
+        let mut points = Vec::new();
+
+        loop {
+            // Track current position before trying to read the entry
+            let current_offset = reader
+                .seek(SeekFrom::Current(0))
+                .expect("Failed to get current offset");
+
+            match bincode::deserialize_from::<_, TimeSeriesPoint>(&mut reader) {
+                Ok(point) => {
+                    points.push((current_offset, point));
+                }
+                Err(err) => {
+                    // Stop reading on EOF or deserialization failure
+                    // You can inspect or log `err` here if needed
+                    break;
+                }
+            }
         }
 
         points
