@@ -1,6 +1,12 @@
 use crate::types::{FieldValue, TimeSeriesPoint};
 use influxdb_line_protocol::{parse_lines, FieldValue as InfluxFieldValue};
 
+#[derive(Debug)]
+pub enum ParsedLine {
+    Ok(TimeSeriesPoint),
+    Err { line: usize, error: String },
+}
+
 pub fn parse_line_protocol(line: &str) -> Result<TimeSeriesPoint, String> {
     let parsed = parse_lines(line)
         .next()
@@ -44,4 +50,18 @@ pub fn parse_line_protocol(line: &str) -> Result<TimeSeriesPoint, String> {
         fields,
         timestamp,
     })
+}
+
+pub fn parse_batch(input: &str) -> Vec<ParsedLine> {
+    input
+        .lines()
+        .enumerate()
+        .map(|(i, line)| match parse_line_protocol(line) {
+            Ok(point) => ParsedLine::Ok(point),
+            Err(e) => ParsedLine::Err {
+                line: i + 1,
+                error: e,
+            },
+        })
+        .collect()
 }

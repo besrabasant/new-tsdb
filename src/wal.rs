@@ -28,6 +28,9 @@ impl WAL {
     pub fn append(&mut self, point: &TimeSeriesPoint) {
         let encoded = bincode::serialize(point).expect("Failed to serialize point");
         self.writer.write_all(&encoded).expect("Failed to write");
+    }
+
+    pub fn flush(&mut self) {
         self.writer.flush().expect("Flush failed");
     }
 

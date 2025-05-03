@@ -1,14 +1,19 @@
+mod parser;
 mod storage;
 mod types;
 mod wal;
-mod parser;
 
-use axum::{body::Bytes, extract::State, routing::{get, post}, Router};
+use axum::{
+    body::Bytes,
+    extract::State,
+    routing::{get, post},
+    Router,
+};
+use parser::{parse_batch, ParsedLine};
 use std::sync::{Arc, Mutex};
 use storage::Storage;
 use tokio::net::TcpListener;
 use wal::WAL;
-use parser::parse_line_protocol;
 
 #[tokio::main]
 async fn main() {
@@ -42,12 +47,40 @@ async fn ingest_handler(
 ) -> String {
     let input = String::from_utf8_lossy(&data);
 
-    match parse_line_protocol(&input) {
-        Ok(point) => {
-            wal.lock().unwrap().append(&point);
-            storage.insert(point);
-            "OK".into()
+    let parsed_lines = parse_batch(&input);
+
+    let mut success_count = 0;
+    let mut error_lines = vec![];
+
+    let mut wal = wal.lock().unwrap();
+
+    for parsed_line in parsed_lines {
+        match parsed_line {
+            ParsedLine::Ok(point) => {
+                wal.append(&point);
+                storage.insert(point);
+                success_count += 1;
+            }
+            ParsedLine::Err { line, error } => {
+                error_lines.push(format!("Line {}: {}", line, error));
+            }
         }
-        Err(e) => format!("Error: {e}"),
     }
+    
+    wal.flush();
+
+    if success_count == 0 {
+        return format!("Error: No valid lines found.\n{}", error_lines.join("\n"));
+    }
+
+    if !error_lines.is_empty() {
+        return format!(
+            "OK ({} lines inserted)\n{}",
+            success_count,
+            error_lines.join("\n")
+        );
+    }
+
+
+    "OK".into()
 }
