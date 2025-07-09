@@ -2,3 +2,5 @@
 /segments
 /data.wal
 tsdb
+*.config.toml
+!sample.config.toml

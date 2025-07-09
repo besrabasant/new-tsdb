@@ -4,6 +4,11 @@
 addr = "0.0.0.0"
 
 # Port to run the API server on
+#
+# This port is used by external services to connect to your app.
+# Make sure this port is open in your firewall.
+# Avoid using privileged ports (like 80 or 443) without root access.
+#
 port = 3000
 
 # Unique node identifier
@@ -11,3 +16,6 @@ node_id = "node-a"
 
 # List of peer node URLs
 peers = ["http://localhost:4001", "http://localhost:4002"]
+
+# Data directory
+data_dir = "./tsdb"
