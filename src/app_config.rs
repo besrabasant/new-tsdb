@@ -32,7 +32,9 @@ pub struct Args {
 /// Combined config struct
 #[derive(Debug, Deserialize, Serialize, ConfigDoc)]
 pub struct AppConfig {
-    #[configdoc(description = "The IP address or hostname the server should listen on (e.g. 127.0.0.1 or 0.0.0.0)")]
+    #[configdoc(
+        description = "The IP address or hostname the server should listen on (e.g. 127.0.0.1 or 0.0.0.0)"
+    )]
     pub addr: String,
 
     #[configdoc(
@@ -43,25 +45,43 @@ pub struct AppConfig {
     )]
     pub port: u16,
 
+    #[configdoc(description = "Gossip port")]
+    pub gossip_port: u16,
+
     #[configdoc(description = "A unique name or ID that identifies this server node in a cluster")]
     pub node_id: String,
 
-    #[configdoc(description = "URLs of other nodes in the network that this node can communicate with")]
-    pub peers: Vec<String>,
+    #[configdoc(
+        description = "The HTTP URL that this node advertises to peers (e.g. http://localhost:3000)"
+    )]
+    pub self_url: String,
 
-    #[configdoc(description = "Path to the folder where the app will store data files. Default is \"./tddb\"")]
+    #[configdoc(
+        description = "URLs of other nodes in the network that this node can communicate with"
+    )]
+    pub bootstrap_peers: Vec<String>,
+
+    #[configdoc(
+        description = "Path to the folder where the app will store data files. Default is \"./tddb\""
+    )]
     pub data_dir: String,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
+        let addr = "0.0.0.0".to_string();
+        let port = 3000;
+        let self_url = format!("http://{}:{}", "localhost", port);
+
         AppConfig {
-            addr: "0.0.0.0".to_string(),
-            port: 3000,
+            addr,
+            port,
+            gossip_port: 5000,
             node_id: "node-a".to_string(),
-            peers: vec![
-                "http://localhost:4001".to_string(),
-                "http://localhost:4002".to_string(),
+            self_url,
+            bootstrap_peers: vec![
+                "localhost:3001".to_string(),
+                "localhost:3002".to_string(),
             ],
             data_dir: "./tsdb".to_string(),
         }
@@ -71,8 +91,6 @@ impl Default for AppConfig {
 /// Load config from file + CLI
 pub fn load_config() -> AppConfig {
     let args = Args::parse();
-
-    println!("Using config file: {:?}", args.config);
 
     if args.generate_config {
         write_sample_config(&args.config);
@@ -97,12 +115,29 @@ pub fn load_config() -> AppConfig {
         }
     };
 
+    // Determine final values, allowing CLI overrides, and compute self_url if not provided
+    let addr = args.addr.unwrap_or_else(|| file_config.addr.clone());
+    let port = args.port.unwrap_or(file_config.port);
+    let gossip_port = file_config.gossip_port;
+    let node_id = args.node_id.unwrap_or_else(|| file_config.node_id.clone());
+    let data_dir = file_config.data_dir.clone();
+    let bootstrap_peers = file_config.bootstrap_peers.clone();
+
+    // If file_config.self_url is empty or defaulted, derive from addr and port
+    let self_url = if !file_config.self_url.is_empty() {
+        file_config.self_url.clone()
+    } else {
+        format!("http://{}:{}", addr, port)
+    };
+
     AppConfig {
-        addr: args.addr.unwrap_or(file_config.addr),
-        port: args.port.unwrap_or(file_config.port),
-        node_id: args.node_id.unwrap_or(file_config.node_id),
-        peers: file_config.peers,
-        data_dir: file_config.data_dir,
+        addr,
+        port,
+        gossip_port,
+        node_id,
+        self_url,
+        bootstrap_peers,
+        data_dir,
     }
 }
 

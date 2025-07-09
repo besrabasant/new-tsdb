@@ -4,3 +4,4 @@
 tsdb
 *.config.toml
 !sample.config.toml
+/node-*

@@ -6,6 +6,7 @@ mod wal;
 
 mod app_config;
 
+use anyhow::{Ok, Result};
 use axum::{
     body::Bytes,
     extract::State,
@@ -20,12 +21,17 @@ use std::sync::Arc;
 use storage::Storage;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
+use tracing_subscriber::{fmt, EnvFilter};
 use types::{AppState, TimeSeriesPoint};
 use wal::WAL;
 
 #[tokio::main]
-async fn main() {
-    tracing_subscriber::fmt::init();
+async fn main() -> Result<()> {
+    // let mut filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug"));
+    // // disable logs from that crate
+    // filter = filter.add_directive("swim-rs=off".parse().unwrap());
+
+    // fmt().with_env_filter(filter).with_target(false).init();
 
     // Load config file
     let config = app_config::load_config();
@@ -43,7 +49,7 @@ async fn main() {
     let storage = Arc::new(Storage {
         config: Arc::clone(&config),
     });
-    let peer_urls = Arc::new(config.peers.clone());
+    let addr = format!("{}:{}", config.addr, config.port);
 
     // Replay existing data
     let replayed = wal.lock().await.replay();
@@ -55,12 +61,19 @@ async fn main() {
         wal: wal.clone(),
         storage: storage.clone(),
         node_id: config.node_id.clone(),
-        peer_urls: peer_urls.clone(),
     };
 
-    // Spawn replicator
-    let replicator = Replicator::new(&state, Arc::clone(&config));
-    tokio::spawn(replicator.run());
+    println!("▶ about to spawn replicator task");
+    let replicator = Replicator::new(&state, Arc::clone(&config))
+        .await
+        .expect("failed to start replicator");
+
+    tokio::spawn(async move {
+        println!("🌀 replicator task has started!");
+        replicator.run().await;
+    });
+
+    tracing::info!("✔ spawned replicator; now starting HTTP server");
 
     // Set up router
     let app = Router::new()
@@ -69,12 +82,12 @@ async fn main() {
         .route("/replicate", post(replicate_handler))
         .with_state(state);
 
-    let addr = format!("{}:{}", config.addr, config.port);
-
     // Run server
     let listener = TcpListener::bind(&addr).await.unwrap();
-    println!("Listening on http://{}", &addr);
+    tracing::info!("Listening on http://{}", &addr);
     axum::serve(listener, app).await.unwrap();
+
+    Ok({})
 }
 
 async fn root() -> &'static str {

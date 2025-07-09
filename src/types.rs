@@ -28,5 +28,4 @@ pub struct AppState {
     pub wal: Arc<Mutex<WAL>>,
     pub storage: Arc<Storage>,
     pub node_id: String,
-    pub peer_urls: Arc<Vec<String>>
 }
