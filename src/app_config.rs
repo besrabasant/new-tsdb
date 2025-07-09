@@ -32,24 +32,24 @@ pub struct Args {
 /// Combined config struct
 #[derive(Debug, Deserialize, Serialize, ConfigDoc)]
 pub struct AppConfig {
-    #[configdoc(description = "Address to bind the API server to")]
+    #[configdoc(description = "The IP address or hostname the server should listen on (e.g. 127.0.0.1 or 0.0.0.0)")]
     pub addr: String,
 
     #[configdoc(
-        description = "Port to run the API server on",
-        long_description = "This port is used by external services to connect to your app.\n\
-                            Make sure this port is open in your firewall.\n\
-                            Avoid using privileged ports (like 80 or 443) without root access."
+        description = "The port number on which the server should accept requests",
+        long_description = "This is the public-facing port used by browsers or other apps to connect to your server.\n\
+                            Make sure this port is not blocked by your system's firewall.\n\
+                            Avoid using ports below 1024 unless your app runs as root (e.g. 80 or 443)."
     )]
     pub port: u16,
 
-    #[configdoc(description = "Unique node identifier")]
+    #[configdoc(description = "A unique name or ID that identifies this server node in a cluster")]
     pub node_id: String,
 
-    #[configdoc(description = "List of peer node URLs")]
+    #[configdoc(description = "URLs of other nodes in the network that this node can communicate with")]
     pub peers: Vec<String>,
 
-    #[configdoc(description = "Data directory")]
+    #[configdoc(description = "Path to the folder where the app will store data files. Default is \"./tddb\"")]
     pub data_dir: String,
 }
 

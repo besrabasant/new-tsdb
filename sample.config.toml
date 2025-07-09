@@ -1,21 +1,21 @@
 # Sample Configuration for new TSDB
 
-# Address to bind the API server to
+# The IP address or hostname the server should listen on (e.g. 127.0.0.1 or 0.0.0.0)
 addr = "0.0.0.0"
 
-# Port to run the API server on
+# The port number on which the server should accept requests
 #
-# This port is used by external services to connect to your app.
-# Make sure this port is open in your firewall.
-# Avoid using privileged ports (like 80 or 443) without root access.
+# This is the public-facing port used by browsers or other apps to connect to your server.
+# Make sure this port is not blocked by your system's firewall.
+# Avoid using ports below 1024 unless your app runs as root (e.g. 80 or 443).
 #
 port = 3000
 
-# Unique node identifier
+# A unique name or ID that identifies this server node in a cluster
 node_id = "node-a"
 
-# List of peer node URLs
+# URLs of other nodes in the network that this node can communicate with
 peers = ["http://localhost:4001", "http://localhost:4002"]
 
-# Data directory
+# Path to the folder where the app will store data files. Default is "./tddb"
 data_dir = "./tsdb"
