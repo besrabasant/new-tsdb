@@ -6,7 +6,6 @@ mod wal;
 
 mod app_config;
 
-
 use axum::{
     body::Bytes,
     extract::State,
@@ -15,6 +14,8 @@ use axum::{
 };
 use parser::{parse_batch, ParsedLine};
 use replicator::Replicator;
+use std::fs;
+use std::path::Path;
 use std::sync::Arc;
 use storage::Storage;
 use tokio::net::TcpListener;
@@ -22,17 +23,26 @@ use tokio::sync::Mutex;
 use types::{AppState, TimeSeriesPoint};
 use wal::WAL;
 
-
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
+    // Load config file
     let config = app_config::load_config();
 
-    // Load config file
+    let data_dir = Path::new(&config.data_dir);
 
-    let wal = Arc::new(Mutex::new(WAL::new("data.wal")));
-    let storage = Arc::new(Storage);
+    // Create data_dir if it doesn't exist
+    if !data_dir.exists() {
+        fs::create_dir_all(data_dir).expect("Failed to create data directory");
+    }
+
+    let config = Arc::new(config);
+    let wal_path = Path::new(&config.data_dir).join("data.wal");
+    let wal = Arc::new(Mutex::new(WAL::new(wal_path)));
+    let storage = Arc::new(Storage {
+        config: Arc::clone(&config),
+    });
     let peer_urls = Arc::new(config.peers.clone());
 
     // Replay existing data
@@ -44,12 +54,12 @@ async fn main() {
     let state = AppState {
         wal: wal.clone(),
         storage: storage.clone(),
-        node_id: config.node_id,
+        node_id: config.node_id.clone(),
         peer_urls: peer_urls.clone(),
     };
 
     // Spawn replicator
-    let replicator = Replicator::new(&state);
+    let replicator = Replicator::new(&state, Arc::clone(&config));
     tokio::spawn(replicator.run());
 
     // Set up router
@@ -125,4 +135,3 @@ async fn replicate_handler(
     wal.flush();
     "Replication received and applied".to_string()
 }
-

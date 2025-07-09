@@ -1,13 +1,14 @@
+use crate::app_config;
 use crate::types::AppState;
 use crate::wal::WAL;
 use dashmap::DashMap;
 use reqwest::Client;
-use std::fs::{File, OpenOptions};
+use std::fs::File;
+use std::io::Write;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
-use std::io::Write;
 
 #[derive(Clone)]
 pub struct Replicator {
@@ -19,11 +20,19 @@ pub struct Replicator {
 }
 
 impl Replicator {
-    pub fn new(state: &AppState) -> Self {
+    pub fn new(state: &AppState, config: Arc<app_config::AppConfig>) -> Self {
+        use std::fs::{self, OpenOptions};
+        use std::path::Path;
+
+        fs::create_dir_all(&config.data_dir).expect("Failed to create data directory");
+
+        // Compose log file path inside data_dir
+        let log_path = Path::new(&config.data_dir).join("replication.log");
+
         let log_file = OpenOptions::new()
             .create(true)
             .append(true)
-            .open("replication.log")
+            .open(&log_path)
             .expect("Failed to open replication log");
 
         Replicator {

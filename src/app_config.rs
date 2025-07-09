@@ -37,6 +37,7 @@ pub struct AppConfig {
     pub addr: String,
     pub node_id: String,
     pub peers: Vec<String>,
+    pub data_dir: String,
 }
 
 
@@ -58,6 +59,7 @@ pub fn load_config() -> AppConfig {
             port: 3000,
             node_id: "node-a".to_string(),
             peers: vec![],
+            data_dir: "./tsdb".to_string(),
         });
 
     // Merge CLI overrides
@@ -66,6 +68,7 @@ pub fn load_config() -> AppConfig {
         port: args.port.unwrap_or(file_config.port),
         node_id: args.node_id.unwrap_or(file_config.node_id),
         peers: file_config.peers,
+        data_dir: file_config.data_dir,
     }
 }
 
