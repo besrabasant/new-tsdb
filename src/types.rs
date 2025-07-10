@@ -5,8 +5,7 @@ use serde::{Serialize, Deserialize};
 use crate::{storage::Storage, wal::WAL};
 
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(untagged)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum FieldValue {
     Int(i64),
     Float(f64),

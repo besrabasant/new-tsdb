@@ -1,99 +1,102 @@
+// ============ WAL Wrapper Using walcraft ============
 use crate::types::TimeSeriesPoint;
-use bincode;
-use std::fs::{File, OpenOptions};
-use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
-use std::path::Path;
+use anyhow::{anyhow, Result};
+use bincode::Serializer;
+use std::path::PathBuf;
 
+// WALcraft imports
+use walcraft::{Size, Wal, WalBuilder};
+
+/// A Write-Ahead Log wrapper around WALcraft for time-series points
 pub struct WAL {
-    writer: BufWriter<File>,
-    path: String,
+    inner: Wal<TimeSeriesPoint>,
+    path: PathBuf, // store the path for cloning
 }
 
 impl WAL {
-    pub fn new<P: AsRef<Path>>(path: P) -> Self {
-        let path_str = path.as_ref().to_string_lossy().to_string();
+      // Create or open the WAL at `path` with custom buffer and storage sizes.
+    /// Create or open the WAL at `path` with custom buffer and storage sizes.
+    pub fn new<P: AsRef<std::path::Path>>(path: P) -> Result<Self> {
+        let file_path = path.as_ref().to_path_buf();
+        // WALcraft expects a directory for storage, not a file. Use the parent directory.
+        let dir = if file_path.is_file() {
+            file_path.parent().unwrap().to_path_buf()
+        } else {
+            file_path.clone()
+        };
+        // ensure the directory exists
+        std::fs::create_dir_all(&dir).map_err(|e| anyhow!("failed to create wal dir: {}", e))?;
+        let loc = dir.to_string_lossy();
+        let inner: Wal<TimeSeriesPoint> = WalBuilder::new()
+            .location(&loc)
+            .buffer_size(Size::Kb(4))     // 4 KiB in-memory buffer
+            .storage_size(Size::Mb(200))  // 200 MiB max storage
+            .enable_fsync()  
+            .build()
+            .map_err(|e| anyhow!("walcraft build error: {}", e))?;
 
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .expect("Failed to open WAL file");
+        Ok(WAL { inner, path: dir })
+    }
 
-        WAL {
-            writer: BufWriter::new(file),
-            path: path_str,
+    /// Append a point to the log (syncs automatically).
+    pub fn append(&self, point: &TimeSeriesPoint) {
+        // clone the point since WALcraft requires owned T
+        self.inner.write(point.clone());
+    }
+
+    /// Read all payloads from the WAL as a sequence of TimeSeriesPoint.
+    pub fn read_all(&self) -> Result<Vec<TimeSeriesPoint>> {
+        let reader = self
+            .inner
+            .read()
+            .map_err(|e| anyhow!("wal read error: {}", e))?;
+        Ok(reader.collect())
+    }
+
+    /// Read all payloads starting at index `start`.
+    pub fn read_since(&self, start: usize) -> Vec<TimeSeriesPoint> {
+        match self.read_all() {
+            Ok(vec) if vec.len() > start => vec.into_iter().skip(start).collect(),
+            Ok(_) | Err(_) => Vec::new(),
         }
     }
 
-    pub fn append(&mut self, point: &TimeSeriesPoint) {
-        let encoded = bincode::serialize(point).expect("Failed to serialize point");
-        self.writer.write_all(&encoded).expect("Failed to write");
+    /// Replay just the payloads from the beginning.
+    pub fn replay(&self) -> Result<Vec<TimeSeriesPoint>> {
+        self.read_all()
     }
 
-    pub fn flush(&mut self) {
-        self.writer.flush().expect("Flush failed");
-    }
-
-    pub fn read_since(&self, offset: usize) -> Vec<TimeSeriesPoint> {
-        let file = File::open(&self.path).expect("Failed to open WAL file for read_since");
-        let mut reader = BufReader::new(file);
-        let mut points = Vec::new();
-
-        // Seek to the byte offset
-        reader
-            .seek(SeekFrom::Start(offset as u64))
-            .expect("Failed to seek WAL");
-
-        // Read and deserialize entries one by one
-        while let Ok(point) = bincode::deserialize_from(&mut reader) {
-            points.push(point);
+    /// Returns true if there are no records.
+    pub fn is_empty(&self) -> bool {
+        match self.read_all() {
+            Ok(vec) => vec.is_empty(),
+            Err(_) => true,
         }
-
-        points
     }
 
-    pub fn read_from_offset(&self, start_offset: u64) -> Vec<(u64, TimeSeriesPoint)> {
-        let file = File::open(&self.path).expect("Failed to open WAL for read");
-        let mut reader = BufReader::new(file);
-
-        reader.seek(SeekFrom::Start(start_offset)).unwrap();
-
-        let mut points = Vec::new();
-
-        loop {
-            // Track current position before trying to read the entry
-            let current_offset = reader
-                .seek(SeekFrom::Current(0))
-                .expect("Failed to get current offset");
-
-            match bincode::deserialize_from::<_, TimeSeriesPoint>(&mut reader) {
-                Ok(point) => {
-                    points.push((current_offset, point));
-                }
-                Err(err) => {
-                    // Stop reading on EOF or deserialization failure
-                    // You can inspect or log `err` here if needed
-                    break;
-                }
-            }
+    /// Returns the number of entries in the log.
+    pub fn len(&self) -> usize {
+        match self.read_all() {
+            Ok(vec) => vec.len(),
+            Err(_) => 0,
         }
-
-        points
     }
 
-    pub fn replay(&self) -> Vec<TimeSeriesPoint> {
-        let file = File::open(&self.path).expect("Failed to open WAL for replay");
-        let mut reader = BufReader::new(file);
-        let mut buffer = Vec::new();
-        reader.read_to_end(&mut buffer).unwrap();
+    /// (No-op) Truncate the WAL up to (and excluding) `upto_seq`.
+    /// walcraft does not currently support truncate directly.
+    pub fn truncate(&self, _upto_seq: u64) -> Result<()> {
+        Ok(())
+    }
 
-        let mut cursor = std::io::Cursor::new(&buffer);
-        let mut points = Vec::new();
+    /// Flush any buffered data to disk (no-op for walcraft).
+    pub fn flush(&self) {
+        // WALcraft syncs on write by default; no explicit flush needed.
+    }
+}
 
-        while let Ok(point) = bincode::deserialize_from(&mut cursor) {
-            points.push(point);
-        }
-
-        points
+impl Clone for WAL {
+    fn clone(&self) -> Self {
+        // Re-open on same path
+        WAL::new(self.path.clone()).expect("failed to clone WAL")
     }
 }

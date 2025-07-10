@@ -24,6 +24,7 @@ use tokio::sync::Mutex;
 use tracing_subscriber::{fmt, EnvFilter};
 use types::{AppState, TimeSeriesPoint};
 use wal::WAL;
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -45,16 +46,18 @@ async fn main() -> Result<()> {
 
     let config = Arc::new(config);
     let wal_path = Path::new(&config.data_dir).join("data.wal");
-    let wal = Arc::new(Mutex::new(WAL::new(wal_path)));
+    let wal_inner = WAL::new(wal_path)?; // WAL, not Result<_,_>
+    let wal = Arc::new(Mutex::new(wal_inner)); // now Mutex<WAL>
     let storage = Arc::new(Storage {
         config: Arc::clone(&config),
     });
     let addr = format!("{}:{}", config.addr, config.port);
 
-    // Replay existing data
-    let replayed = wal.lock().await.replay();
-    for point in &replayed {
-        storage.insert(point.clone());
+    let replayed: Vec<TimeSeriesPoint> = wal.lock().await.replay()?;
+
+    // 2) Move out each point (owned), not a &Vec or &TimeSeriesPoint:
+    for point in replayed {
+        storage.insert(point);
     }
 
     let state = AppState {
@@ -62,6 +65,29 @@ async fn main() -> Result<()> {
         storage: storage.clone(),
         node_id: config.node_id.clone(),
     };
+
+     // Spawn a background “drainer” that takes everything new from the WAL
+    // and writes it into storage, every 100ms.
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            let mut last_idx = 0;
+            loop {
+                // grab everything in the WAL since `last_idx`
+                let new_points = {
+                    let mut w = state.wal.lock().await;
+                    w.read_since(last_idx)
+                };
+                if !new_points.is_empty() {
+                    for pt in new_points.iter() {
+                        state.storage.insert(pt.clone());
+                    }
+                    last_idx += new_points.len();
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        });
+    }
 
     println!("▶ about to spawn replicator task");
     let replicator = Replicator::new(&state, Arc::clone(&config))
@@ -102,13 +128,12 @@ async fn ingest_handler(State(state): State<AppState>, data: Bytes) -> String {
     let mut success_count = 0;
     let mut error_lines = vec![];
 
-    let mut wal = state.wal.lock().await;
+    let wal = state.wal.lock().await;
 
     for parsed_line in parsed_lines {
         match parsed_line {
             ParsedLine::Ok(point) => {
                 wal.append(&point);
-                state.storage.insert(point.clone());
                 success_count += 1;
             }
             ParsedLine::Err { line, error } => {
@@ -138,11 +163,10 @@ async fn replicate_handler(
     State(state): State<AppState>,
     Json(points): Json<Vec<TimeSeriesPoint>>,
 ) -> String {
-    let mut wal = state.wal.lock().await;
+    let  wal = state.wal.lock().await;
 
     for point in points {
         wal.append(&point);
-        state.storage.insert(point);
     }
 
     wal.flush();

@@ -8,20 +8,31 @@ addr = "0.0.0.0"
 # This is the public-facing port used by browsers or other apps to connect to your server.
 # Make sure this port is not blocked by your system's firewall.
 # Avoid using ports below 1024 unless your app runs as root (e.g. 80 or 443).
-#
 port = 3000
 
-# Gossip port
+# Port used for SWIM gossip between nodes
 gossip_port = 5000
 
-# A unique name or ID that identifies this server node in a cluster
+# A unique identifier for this node in the cluster
 node_id = "node-a"
 
-# The HTTP URL that this node advertises to peers (e.g. http://localhost:3000)
-self_url = "http://localhost:3000"
+# Addresses of other nodes for initial gossip discovery
+#
+# Provide a list of `host:port` strings for existing cluster members.
+# SWIM will use these to bootstrap the mesh; once connected,
+# membership updates are discovered dynamically.
+bootstrap_peers = ["localhost:3001", "localhost:3002"]
 
-# URLs of other nodes in the network that this node can communicate with
-bootstrap_peers = ["http://localhost:3001", "http://localhost:3002"]
-
-# Path to the folder where the app will store data files. Default is "./tddb"
+# Directory where all data files (WAL, offsets, logs) are stored
+#
+# This folder will contain your write-ahead log, replication offsets,
+# and any snapshots. Ensure the process has write permissions. (Default: "./tsdb")
 data_dir = "./tsdb"
+
+# Operation mode: standalone or replicaset
+#
+# Choose `standalone` for a single-node deployment with local WAL-based replication.
+# Choose `replicaset` to run as a multi-node cluster using Raft for consensus.
+# In `replicaset` mode, this node will use SWIM for peer discovery,
+# then form or join a Raft group with the discovered members.
+mode = "standalone"

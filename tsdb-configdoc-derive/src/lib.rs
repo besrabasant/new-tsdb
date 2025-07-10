@@ -19,18 +19,18 @@ pub fn derive_config_doc(input: TokenStream) -> TokenStream {
         let field_name = field.ident.as_ref().unwrap();
         let field_name_str = field_name.to_string();
 
-        let mut description_field = syn::LitStr::new("", field_name.span());
-        let mut long_description_field = syn::LitStr::new("", field_name.span());
+        let mut desc = syn::LitStr::new("", field_name.span());
+        let mut long_desc = syn::LitStr::new("", field_name.span());
 
         for attr in &field.attrs {
             if attr.path().is_ident("configdoc") {
                 attr.parse_nested_meta(|meta| {
                     if meta.path.is_ident("description") {
                         let value: LitStr = meta.value()?.parse()?;
-                        description_field = value;
+                        desc = value;
                     } else if meta.path.is_ident("long_description") {
                         let value: LitStr = meta.value()?.parse()?;
-                        long_description_field = value;
+                        long_desc = value;
                     }
                     Ok(())
                 })
@@ -38,28 +38,32 @@ pub fn derive_config_doc(input: TokenStream) -> TokenStream {
             }
         }
 
-        let long_desc_quote = if long_description_field.value().is_empty() {
-            quote! {}
-        } else {
-            let long_desc_string = long_description_field.value();
-
-            let desc_lines = long_desc_string.lines().map(|line| {
-                quote! {
-                    lines.push(format!("# {}", #line));
-                }
-            });
-
+        // Build long-description comments if present
+        let long_desc_block = if !long_desc.value().is_empty() {
+            let lines = long_desc
+                .value()
+                .lines()
+                .map(|l| LitStr::new(l, field_name.span()))
+                .collect::<Vec<_>>();
             quote! {
                 lines.push("#".to_string());
-                #(#desc_lines)*
-                lines.push("#".to_string());
+                #(
+                    lines.push(format!("# {}", #lines));
+                )*
             }
+        } else {
+            quote! {}
         };
 
+       // Use toml::to_string to serialize the field value exactly as Serde would
         quote! {
-            lines.push(format!("# {}", #description_field));
-            #long_desc_quote
-            lines.push(format!("{} = {:?}", #field_name_str, &self.#field_name));
+            lines.push(format!("# {}", #desc));
+            #long_desc_block
+            // Serialize field value via toml::Value for correct formatting
+            let val = toml::Value::try_from(&self.#field_name)
+                .map(|v| v.to_string())
+                .unwrap_or_else(|_| format!("{:?}", &self.#field_name));
+            lines.push(format!("{} = {}", #field_name_str, val));
             lines.push(String::new());
         }
     });

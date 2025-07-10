@@ -29,6 +29,12 @@ pub struct Args {
     generate_config: bool,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum Mode {
+    Standalone,
+    Replicaset,
+}
 /// Combined config struct
 #[derive(Debug, Deserialize, Serialize, ConfigDoc)]
 pub struct AppConfig {
@@ -45,45 +51,50 @@ pub struct AppConfig {
     )]
     pub port: u16,
 
-    #[configdoc(description = "Gossip port")]
+    #[configdoc(description = "Port used for SWIM gossip between nodes")]
     pub gossip_port: u16,
 
-    #[configdoc(description = "A unique name or ID that identifies this server node in a cluster")]
+    #[configdoc(description = "A unique identifier for this node in the cluster")]
     pub node_id: String,
 
     #[configdoc(
-        description = "The HTTP URL that this node advertises to peers (e.g. http://localhost:3000)"
-    )]
-    pub self_url: String,
-
-    #[configdoc(
-        description = "URLs of other nodes in the network that this node can communicate with"
+        description = "Addresses of other nodes for initial gossip discovery",
+        long_description = "Provide a list of `host:port` strings for existing cluster members.\n\
+                            SWIM will use these to bootstrap the mesh; once connected,\n\
+                            membership updates are discovered dynamically."
     )]
     pub bootstrap_peers: Vec<String>,
 
     #[configdoc(
-        description = "Path to the folder where the app will store data files. Default is \"./tddb\""
+        description = "Directory where all data files (WAL, offsets, logs) are stored",
+        long_description = "This folder will contain your write-ahead log, replication offsets,\n\
+                            and any snapshots. Ensure the process has write permissions. (Default: \"./tsdb\")"
     )]
     pub data_dir: String,
+
+    #[configdoc(
+        description = "Operation mode: standalone or replicaset",
+        long_description = "Choose `standalone` for a single-node deployment with local WAL-based replication.\n\
+                           Choose `replicaset` to run as a multi-node cluster using Raft for consensus.\n\
+                           In `replicaset` mode, this node will use SWIM for peer discovery,\n\
+                           then form or join a Raft group with the discovered members."
+    )]
+    pub mode: Mode,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         let addr = "0.0.0.0".to_string();
         let port = 3000;
-        let self_url = format!("http://{}:{}", "localhost", port);
 
         AppConfig {
             addr,
             port,
             gossip_port: 5000,
             node_id: "node-a".to_string(),
-            self_url,
-            bootstrap_peers: vec![
-                "localhost:3001".to_string(),
-                "localhost:3002".to_string(),
-            ],
+            bootstrap_peers: vec!["localhost:3001".to_string(), "localhost:3002".to_string()],
             data_dir: "./tsdb".to_string(),
+            mode: Mode::Standalone,
         }
     }
 }
@@ -122,22 +133,16 @@ pub fn load_config() -> AppConfig {
     let node_id = args.node_id.unwrap_or_else(|| file_config.node_id.clone());
     let data_dir = file_config.data_dir.clone();
     let bootstrap_peers = file_config.bootstrap_peers.clone();
-
-    // If file_config.self_url is empty or defaulted, derive from addr and port
-    let self_url = if !file_config.self_url.is_empty() {
-        file_config.self_url.clone()
-    } else {
-        format!("http://{}:{}", addr, port)
-    };
+    let mode = file_config.mode.clone();
 
     AppConfig {
         addr,
         port,
         gossip_port,
         node_id,
-        self_url,
         bootstrap_peers,
         data_dir,
+        mode,
     }
 }
 
